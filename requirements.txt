@@ -1,0 +1,3 @@
+requests==2.12.4
+six==1.10.0
+smartobjects==1.0.26
