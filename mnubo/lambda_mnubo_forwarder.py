@@ -30,6 +30,7 @@ field_names['device_id'] = os.environ.get('DEVICE_ID_FIELD', 'device_id')
 field_names['event_id'] = os.environ.get('EVENT_ID_FIELD', 'event_id')
 field_names['event_type'] = os.environ.get('EVENT_TYPE_FIELD', 'event_type')
 field_names['owner_username'] = os.environ.get('OWNER_USERNAME_FIELD', 'owner_username')
+field_names['object_attributes'] = os.environ.get('OBJECT_ATTR_ROOT_FIELD', 'object_attributes')
 field_names['object_type'] = os.environ.get('OBJECT_TYPE_FIELD', 'object_type')
 field_names['timestamp'] = os.environ.get('TIMESTAMP_FIELD', 'timestamp')
 field_names['latitude'] = os.environ.get('LATITUDE_FIELD', 'latitude')
@@ -171,22 +172,21 @@ class MnuboEvent(object):
         return self._device_id
 
     @device_id.setter
-    def device_id(self, device_id=None):
-        if device_id is not None:
-            assert isinstance(device_id, str)
-        self._device_id = device_id
+    def device_id(self, value):
+        if value is not None:
+            self._device_id = value
 
     @property
     def event_data(self):
         return self._event_data
 
     @event_data.setter
-    def event_data(self, event_data=None):
-        if event_data is None:
+    def event_data(self, value):
+        if value is None:
             self._event_data = dict()
-        if event_data is not None:
-            assert isinstance(event_data, dict)
-        self._event_data = event_data
+        if value is not None:
+            assert isinstance(value, dict)
+        self._event_data = value
 
     @property
     def event_id(self):
@@ -297,6 +297,18 @@ def map_to_mnubo_event(event):
         mnubo_data.timestamp = event.get(field_names['timestamp'], None)
         event.pop(field_names['timestamp'])
 
+    # Cleanup
+    if field_names['object_attributes'] in event:
+        event.pop(field_names['object_attributes'])
+    if field_names['registration_date'] in event:
+        event.pop(field_names['longitude'])
+    if field_names['object_type'] in event:
+        event.pop(field_names['object_type'])
+    if field_names['owner_username'] in event:
+        event.pop(field_names['owner_username'])
+    if field_names['last_update'] in event:
+        event.pop(field_names['last_update'])
+
     ############################################################
     # Insert any other custom transformation on event dict here
     ############################################################
@@ -340,6 +352,11 @@ def map_to_mnubo_object(event):
     if field_names['timestamp'] in event:
         mnubo_object.timestamp = event.get(field_names['timestamp'], None)
         event.pop(field_names['timestamp'])
+    if field_names['object_attributes'] in event:
+        custom_attributes = copy.deepcopy(event.get(field_names['object_attributes'], None))
+        assert isinstance(custom_attributes, dict)
+        mnubo_object.custom_attributes = custom_attributes
+        event.pop(field_names['object_attributes'])
 
     ############################################################
     # Insert any other custom transformation on event dict here
@@ -351,7 +368,7 @@ def map_to_mnubo_object(event):
 
 # Now we begin.
 logger.info('Loading function')
-select_mnubo_env(env_name=os.environ.get('MNUBO_ENV', 'sandbox'))
+config['environment'] = select_mnubo_env(env_name=os.environ.get('MNUBO_ENV', 'sandbox'))
 
 
 def cached_mnubo_object_exists(device_id):
@@ -382,11 +399,12 @@ def mnubo_create_object(mnubo_object):
 def lambda_handler(event, context):
     global client
     global config
+    rc = False
 
     if client is None:
-        client = SmartObjectsClient(client_id=config.get('client_id'),
-                                    client_secret=config.get('client_secret'),
-                                    environment=config.get('environment'))
+        client = SmartObjectsClient(client_id=config['client_id'],
+                                    client_secret=config['client_secret'],
+                                    environment=config['environment'])
 
     mnubo_event = map_to_mnubo_event(event=copy.deepcopy(event))
 
@@ -405,6 +423,7 @@ def lambda_handler(event, context):
         raise ValueError('We cannot send an event because of missing [ {0} ] or [ {1} ] fields. Event data: {2}'
                          .format(field_names['device_id'], field_names['event_type'], event))
     results = client.events.send(events=[mnubo_event.build()])
+    if results is not None:
+        rc = True
     logger.info('Remaining time in ms: {0}'.format(context.get_remaining_time_in_millis()))
-
-    return results
+    return rc
