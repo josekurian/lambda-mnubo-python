@@ -1,2 +1,3 @@
 from lambda_mnubo_forwarder import map_to_mnubo_event
+from lambda_mnubo_forwarder import map_to_mnubo_object
 from lambda_mnubo_forwarder import select_mnubo_env
