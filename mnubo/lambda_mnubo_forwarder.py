@@ -6,7 +6,6 @@ import logging
 import re
 import time
 import copy
-import json
 from lru import LRU
 from smartobjects import SmartObjectsClient
 from smartobjects import Environments
@@ -265,24 +264,6 @@ class MnuboEvent(object):
         return mnubo_event
 
 
-def _byteify(data, ignore_dicts=False):
-    # if this is a unicode string, return its string representation
-    if isinstance(data, unicode):
-        return data.encode('utf-8')
-    # if this is a list of values, return list of byteified values
-    if isinstance(data, list):
-        return [_byteify(item, ignore_dicts=ignore_dicts) for item in data]
-    # if this is a dictionary, return dictionary of byteified keys and values
-    # but only if we haven't already byteified it
-    if isinstance(data, dict) and not ignore_dicts:
-        return {
-            _byteify(key, ignore_dicts=ignore_dicts): _byteify(value, ignore_dicts=ignore_dicts)
-            for key, value in data.items()
-        }
-    # if it's anything else, return it in its original form
-    return data
-
-
 def select_mnubo_env(env_name):
     # Do some sanity checks on the environments and return the right value for the mnubo client
     if env_name == 'production':
@@ -327,7 +308,7 @@ def map_to_mnubo_event(event):
     if field_names['object_attributes'] in event:
         event.pop(field_names['object_attributes'])
     if field_names['registration_date'] in event:
-        event.pop(field_names['longitude'])
+        event.pop(field_names['registration_date'])
     if field_names['object_type'] in event:
         event.pop(field_names['object_type'])
     if field_names['owner_username'] in event:
@@ -443,8 +424,8 @@ def mnubo_create_object(mnubo_object):
     try:
         c.objects.create(mnubo_object.build())
     except ValueError as e:
-        p = re.compile(r"already exists")
-        if p.search(e):
+        p = re.compile(r'already exists')
+        if p.search(e.message):
             pass
         else:
             raise
