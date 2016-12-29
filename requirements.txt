@@ -2,3 +2,4 @@ requests==2.12.4
 six==1.10.0
 smartobjects==1.0.26
 lru-dict==1.1.6
+boto3==1.4.3

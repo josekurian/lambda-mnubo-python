@@ -6,14 +6,12 @@ import logging
 import re
 import time
 import copy
+import json
 from lru import LRU
 from smartobjects import SmartObjectsClient
 from smartobjects import Environments
+import boto3
 
-
-# Constants
-CACHE_VALIDITY_PERIOD = 3600
-CACHE_MAX_ENTRIES = 1000000
 
 # Global variables
 global_cache = None
@@ -29,7 +27,9 @@ config['cache_max_entries'] = int(os.environ.get('CACHE_MAX_ENTRIES', 1000000))
 config['cache_validity_period'] = int(os.environ.get('CACHE_VALIDITY_PERIOD', 3600))
 
 # Mnubo SmartObjects Client
-client = None
+mnubo_client = None
+# AWS IoT Client
+iot_client = None
 
 # Default field name mappings
 field_names = dict()
@@ -265,6 +265,24 @@ class MnuboEvent(object):
         return mnubo_event
 
 
+def _byteify(data, ignore_dicts=False):
+    # if this is a unicode string, return its string representation
+    if isinstance(data, unicode):
+        return data.encode('utf-8')
+    # if this is a list of values, return list of byteified values
+    if isinstance(data, list):
+        return [_byteify(item, ignore_dicts=ignore_dicts) for item in data]
+    # if this is a dictionary, return dictionary of byteified keys and values
+    # but only if we haven't already byteified it
+    if isinstance(data, dict) and not ignore_dicts:
+        return {
+            _byteify(key, ignore_dicts=ignore_dicts): _byteify(value, ignore_dicts=ignore_dicts)
+            for key, value in data.items()
+        }
+    # if it's anything else, return it in its original form
+    return data
+
+
 def select_mnubo_env(env_name):
     # Do some sanity checks on the environments and return the right value for the mnubo client
     if env_name == 'production':
@@ -327,48 +345,50 @@ def map_to_mnubo_event(event):
     return mnubo_data
 
 
-def map_to_mnubo_object(event):
+def map_to_mnubo_object(device_id):
     global field_names
-    # Sanity check
-    assert isinstance(event, dict)
 
     # Create a new mnubo-formatted event
     mnubo_object = MnuboObject()
     assert isinstance(mnubo_object, MnuboObject)
+    logger.info('About to get thing data on: {0}'.format(device_id))
+    thing = get_thing_attributes(device_id=device_id)
+    mnubo_object.device_id = thing['thingName']
+    mnubo_object.object_type = thing['thingTypeName']
 
-    if field_names['device_id'] in event:
-        mnubo_object.device_id = event.get(field_names['device_id'], None)
-        event.pop(field_names['device_id'])
-    if field_names['object_type'] in event:
-        mnubo_object.object_type = event.get(field_names['object_type'], None)
-        event.pop(field_names['object_type'])
-    if field_names['owner_username'] in event:
-        mnubo_object.owner_username = event.get(field_names['owner_username'], None)
-        event.pop(field_names['owner_username'])
-    if field_names['latitude'] in event:
-        mnubo_object.latitude = event.get(field_names['latitude'], None)
-        event.pop(field_names['latitude'])
-    if field_names['last_update'] in event:
-        mnubo_object.last_update_timestamp = event.get(field_names['last_update'], None)
-        event.pop(field_names['last_update'])
-    if field_names['longitude'] in event:
-        mnubo_object.longitude = event.get(field_names['longitude'], None)
-        event.pop(field_names['longitude'])
-    if field_names['registration_date'] in event:
-        mnubo_object.registration_date = event.get(field_names['registration_date'], None)
-        event.pop(field_names['longitude'])
-    if field_names['timestamp'] in event:
-        mnubo_object.timestamp = event.get(field_names['timestamp'], None)
-        event.pop(field_names['timestamp'])
-    if field_names['object_attributes'] in event:
-        custom_attributes = copy.deepcopy(event.get(field_names['object_attributes'], None))
-        assert isinstance(custom_attributes, dict)
-        mnubo_object.custom_attributes = custom_attributes
-        event.pop(field_names['object_attributes'])
+    thing_attrs = copy.deepcopy(thing['attributes'])
+
+    if field_names['device_id'] in thing_attrs:
+        mnubo_object.owner_username = thing_attrs.get(field_names['device_id'], None)
+        thing_attrs.pop(field_names['device_id'])
+    # if field_names['owner_username'] in thing_attrs:
+    #     mnubo_object.owner_username = thing_attrs.get(field_names['owner_username'], None)
+    #     thing_attrs.pop(field_names['owner_username'])
+    if field_names['latitude'] in thing_attrs:
+        mnubo_object.latitude = thing_attrs.get(field_names['latitude'], None)
+        thing_attrs.pop(field_names['latitude'])
+    if field_names['last_update'] in thing_attrs:
+        mnubo_object.last_update_timestamp = thing_attrs.get(field_names['last_update'], None)
+        thing_attrs.pop(field_names['last_update'])
+    if field_names['longitude'] in thing_attrs:
+        mnubo_object.longitude = thing_attrs.get(field_names['longitude'], None)
+        thing_attrs.pop(field_names['longitude'])
+    if field_names['registration_date'] in thing_attrs:
+        mnubo_object.registration_date = thing_attrs.get(field_names['registration_date'], None)
+        thing_attrs.pop(field_names['longitude'])
+    if field_names['timestamp'] in thing_attrs:
+        mnubo_object.timestamp = thing_attrs.get(field_names['timestamp'], None)
+        thing_attrs.pop(field_names['timestamp'])
 
     ############################################################
     # Insert any other custom transformation on event dict here
     ############################################################
+    if 'temperature' in thing_attrs:
+        thing_attrs.pop('temperature')
+    if 'owner_username' in thing_attrs:
+        thing_attrs.pop('owner_username')
+
+    mnubo_object.custom_attributes = thing_attrs
 
     # Returned the mnubo-compatible object
     return mnubo_object
@@ -420,7 +440,14 @@ def mnubo_create_object(mnubo_object):
     if mnubo_object.owner_username is not None:
         if not c.owners.owner_exists(mnubo_object.owner_username):
             mnubo_object.owner_username = None
-    c.objects.create(mnubo_object.build())
+    try:
+        c.objects.create(mnubo_object.build())
+    except ValueError as e:
+        p = re.compile(r"already exists")
+        if p.search(e):
+            pass
+        else:
+            raise
 
 
 def send_mnubo_event(mnubo_event):
@@ -436,13 +463,30 @@ def send_mnubo_event(mnubo_event):
 
 
 def get_mnubo_client():
-    global client
+    global mnubo_client
     global config
-    if not isinstance(client, SmartObjectsClient):
-        client = SmartObjectsClient(client_id=config['client_id'],
-                                    client_secret=config['client_secret'],
-                                    environment=config['environment'])
-    return client
+    if not isinstance(mnubo_client, SmartObjectsClient):
+        mnubo_client = SmartObjectsClient(client_id=config['client_id'],
+                                          client_secret=config['client_secret'],
+                                          environment=config['environment'])
+    return mnubo_client
+
+
+def get_aws_iot_client():
+    global iot_client
+    if iot_client is None:
+        iot_client = boto3.client('iot')
+    return iot_client
+
+
+def get_thing_attributes(device_id):
+    c = get_aws_iot_client()
+    r = c.describe_thing(thingName=device_id)
+    # Cleanup
+    r.pop('ResponseMetadata')
+    r.pop('version')
+    r.pop('defaultClientId')
+    return r
 
 
 # AWS Lambda handler function
@@ -455,16 +499,8 @@ def lambda_handler(event, context):
             target_object_exists = cached_mnubo_object_exists(mnubo_event.device_id)
         else:
             target_object_exists = mnubo_object_exists(mnubo_event.device_id)
-
         if not target_object_exists:
-            mnubo_object = map_to_mnubo_object(event=copy.deepcopy(event))
-            if mnubo_object.device_id is None or mnubo_object.object_type is None:
-                raise ValueError('We cannot create object [ {0} ] because of missing '
-                                 '[ {1} ] or [ {2} ] fields. Event data: {3}'
-                                 .format(mnubo_object.device_id,
-                                         field_names['device_id'],
-                                         field_names['object_type'],
-                                         event))
+            mnubo_object = map_to_mnubo_object(device_id=mnubo_event.device_id)
             mnubo_create_object(mnubo_object)
         rc = send_mnubo_event(mnubo_event)
     except Exception:
