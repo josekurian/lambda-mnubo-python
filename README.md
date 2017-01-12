@@ -69,10 +69,13 @@ When deploying the lambda function, you will need to have the following IAM poli
 Available handlers
 ------------------
 * `lambda_mnubo_forwarder.iot_custom_event_handler`: To be used when IoT thing events are sent into a seperate custom MQTT topic. The messages sent to the function must contain a `device_id` field matching the AWS IoT Thing name at a minimum. This will create a corresponding SmartObject in the mnubo platform and send the events through. Here's a sample rule select statement:
+
 ```
 SELECT * FROM 'temperature_thing_events'
 ```
-* `lambda_mnubo_forwarder.iot_shadow_update_event_handler`: To be used when the IoT shadow documents are to be used to send time series to mnubo. A rule must be placed on the shadow accepted topic must be placed. The Thing name must be added as the device_id Here's a sample rule select statement:
+
+* `lambda_mnubo_forwarder.iot_shadow_update_event_handler`: To be used when the IoT shadow documents are to be used to send time series to mnubo. A rule must be placed on the shadow accepted topic must be placed. The Thing name must be added as the `device_id`. Here's a sample rule select statement:
+
 ```
 SELECT *, topic(3) as device_id FROM '$aws/things/+/shadow/update/accepted'
 ```
