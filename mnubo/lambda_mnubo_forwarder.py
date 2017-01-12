@@ -6,6 +6,7 @@ import logging
 import re
 import time
 import copy
+import datetime
 from lru import LRU
 from smartobjects import SmartObjectsClient
 from smartobjects import Environments
@@ -269,6 +270,17 @@ class Event(object):
         return mnubo_event
 
 
+def standardize_timestamp(ts):
+    """ Utility method to convert a timestamp to a ISO format if it can.
+    :param ts: timestamp in epoch format. Will try any number as long as it's not None or a string.
+    :return: timestamp in ISO format or a String passed to it or None
+    """
+    if ts is not None and not isinstance(ts, str):
+        return datetime.datetime.utcfromtimestamp(ts).isoformat()
+    else:
+        return ts
+
+
 def mnubo_object_exists(device_id):
     """ Method to lookup the object on the mnubo platform
     :param device_id:
@@ -420,13 +432,13 @@ def map_thing_to_smart_object(thing):
     # If a latitude was defined, take it.
     mnubo_object.latitude = thing_attrs.pop('latitude', None)
     # If a last update timestamp is available, take it.
-    mnubo_object.last_update_timestamp = thing_attrs.pop('last_update', None)
+    mnubo_object.last_update_timestamp = standardize_timestamp(thing_attrs.pop('last_update', None))
     # If a longitude was defined, take it.
     mnubo_object.longitude = thing_attrs.pop('longitude', None)
     # If a registration date is available, take it.
-    mnubo_object.registration_date = thing_attrs.pop('registration_date', None)
+    mnubo_object.registration_date = standardize_timestamp(thing_attrs.pop('registration_date', None))
     # If a timestamp for the object is available, take it.
-    mnubo_object.timestamp = thing_attrs.pop('timestamp', None)
+    mnubo_object.timestamp = standardize_timestamp(thing_attrs.pop('timestamp', None))
 
     # Cleanup unwanted keys defined in the blacklist variable.
     for v in smart_object_attributes_blacklist:
@@ -486,7 +498,7 @@ def map_shadow_update_to_mnubo_event(event):
     # Assign a default or environment variable event type to this event
     mnubo_data.event_type = SHADOW_UPDATE_EVENT_TYPE
     # Get the timestamp of this shadow update accepted document
-    mnubo_data.timestamp = event.get('metadata', dict()).get('timestamp', None)
+    mnubo_data.timestamp = standardize_timestamp(event.get('metadata', dict()).get('timestamp', None))
     # If an event id is present, use it. Else, the mnubo platform will generate one.
     mnubo_data.event_id = shadow_reported.pop('event_id', None)
     # If a latitude is present, take it.
@@ -527,7 +539,7 @@ def map_iot_event_to_mnubo_event(event):
     # modified using an environment variable.
     mnubo_data.event_type = event.pop('event_type', IOT_MQTT_EVENT_TYPE)
     # If there's a timestamp in the event, use it.
-    mnubo_data.timestamp = event.pop('timestamp', None)
+    mnubo_data.timestamp = standardize_timestamp(event.pop('timestamp', None))
     # If there's a device_id in the event, take it.
     mnubo_data.device_id = event.pop('device_id', None)
     # If there's a custom event id, take it.
