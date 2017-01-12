@@ -76,6 +76,7 @@ SELECT * FROM 'temperature_thing_events'
 ```
 SELECT *, topic(3) as device_id FROM '$aws/things/+/shadow/update/accepted'
 ```
+
 Tests
 ------------------
 
