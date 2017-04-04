@@ -25,6 +25,7 @@ Configuration
 
 When deploying the lambda function, basic behaviour can be modified using environment variables. These are the following:
 
+* `MNUBO_ENV`: The mnubo environment (defaults to `sandbox`, can be `production`)
 * `MNUBO_CLIENT_ID`: The mnubo client ID credential
 * `MNUBO_CLIENT_SECRET`: The mnubo client secret credential
 * `USE_OBJECT_CACHE`: Defaults to 1 to use the local LRU object cache. Set to 0 to disable it.
